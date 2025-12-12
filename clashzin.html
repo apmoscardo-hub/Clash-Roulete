@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Clash Roulete</title>
+  <style>
+    :root {
+      --gold: #D4AF37;
+      --white: #FFFFFF;
+      --bg: #FFFFFF;
+      --text: #FFFFFF;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+      background: var(--bg);
+      color: #222;
+    }
+
+    .game {
+      min-height: 100%;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    .stage {
+      position: relative;
+      width: min(90vw, 520px);
+      height: min(90vw, 520px);
+    }
+
+    /* Seta branca apontando para baixo */
+    .arrow {
+      position: absolute;
+      top: -38px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 18px solid transparent;
+      border-right: 18px solid transparent;
+      border-top: 28px solid var(--white); /* triângulo virado para baixo */
+      filter: drop-shadow(0 2px 2px rgba(0,0,0,0.15));
+      z-index: 10;
+    }
+
+    /* Container da roleta que será rotacionado */
+    .wheel-wrap {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      transition: transform 3.5s cubic-bezier(.17,.67,.11,1.03);
+      will-change: transform;
+    }
+
+    /* Canvas com borda dourada externa */
+    canvas.wheel {
+      width: 100%;
+      height: 100%;
+      max-width: 520px;
+      max-height: 520px;
+      display: block;
+      border-radius: 50%;
+      /* Borda externa dourada (contorno do disco) */
+      box-shadow:
+        0 0 0 8px var(--gold),              /* aro externo */
+        inset 0 0 0 2px rgba(0,0,0,0.1);    /* leve profundidade */
+      background: transparent;
+    }
+
+    /* Botão central "GIRAR" */
+    .spin-btn {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      border: none;
+      background: var(--gold);
+      color: var(--white);
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      z-index: 5;
+      display: grid;
+      place-items: center;
+      box-shadow:
+        0 6px 14px rgba(0,0,0,0.2),
+        inset 0 0 0 3px rgba(255,255,255,0.35);
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .spin-btn:active { transform: translate(-50%, -50%) scale(0.98); }
+
+    /* Título do jogo */
+    .title {
+      position: absolute;
+      width: 100%;
+      top: -80px;
+      text-align: center;
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      color: #111;
+    }
+
+    /* Responsivo: ajusta título e seta em telas menores */
+    @media (max-width: 420px) {
+      .title { top: -72px; font-size: 1.15rem; }
+      .arrow { top: -32px; border-left-width: 16px; border-right-width: 16px; border-top-width: 24px; }
+      .spin-btn { width: 84px; height: 84px; font-size: 0.9rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="game">
+    <div class="stage">
+      <div class="title">Clash Roulete</div>
+      <div class="arrow"></div>
+
+      <div class="wheel-wrap" id="wheelWrap">
+        <canvas id="wheel" class="wheel" width="520" height="520" aria-label="Roleta colorida"></canvas>
+      </div>
+
+      <button class="spin-btn" id="spinBtn" aria-label="Girar a roleta">GIRAR</button>
+    </div>
+  </div>
+
+  <script>
+    // Configuração dos segmentos (9 pedaços, 40° cada)
+    const segments = [
+      { label: 'Mini PEKKA',       color: '#74B9FF' }, // azul claro
+      { label: 'Mago',             color: '#0D47A1' }, // azul escuro
+      { label: 'Corredor',         color: '#8D6E63' }, // marrom
+      { label: 'Aríete de batalha',color: '#F57C00' }, // laranja
+      { label: 'Príncipe',         color: '#FDD835' }, // amarelo
+      { label: 'Mega cavaleiro',   color: '#9E9E9E' }, // cinza
+      { label: 'Lançador',         color: '#8E24AA' }, // roxo
+      { label: 'Valquíria',        color: '#2ECC71' }, // verde
+      { label: 'Arqueiras',        color: '#F48FB1' }  // rosa
+    ];
+
+    const GOLD = '#D4AF37';
+    const WHITE = '#FFFFFF';
+
+    const canvas = document.getElementById('wheel');
+    const ctx = canvas.getContext('2d');
+
+    const wheelWrap = document.getElementById('wheelWrap');
+    const spinBtn   = document.getElementById('spinBtn');
+
+    const size = canvas.width;            // 520
+    const center = size / 2;              // 260
+    const radius = center - 12;           // reduzir para caber bordas internas
+    const anglePer = (2 * Math.PI) / segments.length; // 40° em radianos
+
+    function drawWheel() {
+      ctx.clearRect(0, 0, size, size);
+
+      // Fundo transparente, borda dourada externa já é via box-shadow no CSS
+
+      // Desenhar fatias
+      for (let i = 0; i < segments.length; i++) {
+        const start = i * anglePer - Math.PI / 2; // iniciar no topo (12h)
+        const end = start + anglePer;
+
+        // Fatia preenchida
+        ctx.beginPath();
+        ctx.moveTo(center, center);
+        ctx.arc(center, center, radius, start, end);
+        ctx.closePath();
+        ctx.fillStyle = segments[i].color;
+        ctx.fill();
+
+        // Divisória dourada (linha entre as fatias)
+        ctx.beginPath();
+        ctx.moveTo(center, center);
+        ctx.arc(center, center, radius, start, end);
+        ctx.lineTo(center, center);
+        ctx.strokeStyle = GOLD;
+        ctx.lineWidth = 6;  // divisórias mais visíveis
+        ctx.stroke();
+
+        // Texto no meio da fatia
+        const mid = (start + end) / 2;
+        const textRadius = radius * 0.67;
+
+        // Coordenadas para posicionar o texto
+        const tx = center + Math.cos(mid) * textRadius;
+        const ty = center + Math.sin(mid) * textRadius;
+
+        ctx.save();
+        ctx.translate(tx, ty);
+        ctx.rotate(mid + Math.PI / 2); // manter leitura radial
+        ctx.fillStyle = WHITE;
+        ctx.font = '700 16px Segoe UI, Roboto, Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Quebra adaptativa para "Aríete de batalha" se necessário
+        const label = segments[i].label;
+        if (label.length > 14 && label.includes(' ')) {
+          const parts = label.split(' ');
+          const line1 = parts.slice(0, Math.ceil(parts.length / 2)).join(' ');
+          const line2 = parts.slice(Math.ceil(parts.length / 2)).join(' ');
+          ctx.fillText(line1, 0, -10);
+          ctx.fillText(line2, 0, 10);
+        } else {
+          ctx.fillText(label, 0, 0);
+        }
+        ctx.restore();
+      }
+
+      // Círculo central com aro dourado fino para integridade visual
+      ctx.beginPath();
+      ctx.arc(center, center, 40, 0, 2 * Math.PI);
+      ctx.strokeStyle = GOLD;
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    }
+
+    drawWheel();
+
+    // Lógica de giro
+    let spinning = false;
+    let currentRotation = 0;
+
+    function spin() {
+      if (spinning) return;
+      spinning = true;
+
+      // Giros aleatórios + offset para resultado
+      const extraTurns = 4 + Math.floor(Math.random() * 4); // 4–7 voltas
+      const targetSegment = Math.floor(Math.random() * segments.length); // 0..8
+
+      // Como a seta aponta para baixo (topo do canvas), precisamos alinhar
+      // a roleta de modo que o segmento escolhido fique sob a seta.
+      // A rotação positiva gira no sentido horário. Como o canvas foi
+      // desenhado com início no topo, calcular offset:
+      const segmentAngleDeg = 360 / segments.length; // 40°
+      const baseDeg = targetSegment * segmentAngleDeg;
+      const alignToTop = segmentAngleDeg / 2; // centraliza o segmento na seta
+
+      const targetDeg = extraTurns * 360 + (baseDeg + alignToTop);
+
+      // Atualiza rotação acumulada para transição suave
+      const nextRotation = currentRotation + targetDeg;
+
+      wheelWrap.style.transform = `rotate(${nextRotation}deg)`;
+
+      // Ao final da animação, liberar e normalizar rotação
+      const durationMs = 3500;
+      setTimeout(() => {
+        currentRotation = nextRotation % 360; // mantém valor controlado
+        spinning = false;
+
+        // Opcional: identificar o segmento vencedor (para uso futuro)
+        // const idxFromRotation = Math.round(((360 - currentRotation) % 360) / segmentAngleDeg) % segments.length;
+        // alert('Resultado: ' + segments[idxFromRotation].label);
+      }, durationMs);
+    }
+
+    spinBtn.addEventListener('click', spin);
+  </script>
+</body>
+</html>
